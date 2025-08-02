@@ -5,7 +5,11 @@ import { Prisma } from '@/generated/prisma';
 
 // --- Configuration for Optimum Nutrition ---
 const OPTIMUM_NUTRITION_DOMAIN = 'https://www.optimumnutrition.co.in';
-const CATEGORY = `${OPTIMUM_NUTRITION_DOMAIN}/collections/protein-powder`; // Target URL for ON's protein category
+
+// This is the main category hub page where all product types are listed
+const CATEGORY = `${OPTIMUM_NUTRITION_DOMAIN}/collections/shop-by-product`;
+
+// Your Gemini API key from environment variables (unchanged)
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 interface Nutrient {
@@ -41,30 +45,77 @@ export async function GET() {
   try {
     console.log(`Navigating to category: ${CATEGORY}`);
     await page.goto(CATEGORY, { waitUntil: 'networkidle' });
-    await page.evaluate(() => window.scrollBy(0, document.body.scrollHeight));
-    await page.waitForTimeout(3000);
 
-    // --- New Selector Logic for ON Product Links ---
-    // Using the href structure you identified.
-    const productLinks: string[] = await page.$$eval(
-      'a.full-unstyled-link[href^="/products/"]', // Targets links with the specific class and href
-      (anchors, domain) => anchors.map((a) => `${domain}${(a as HTMLAnchorElement).getAttribute('href')}`),
-      OPTIMUM_NUTRITION_DOMAIN // Pass the domain to the browser context
+    // Scroll to load all products
+    await page.evaluate(async () => {
+      await new Promise<void>((resolve) => {
+        let totalHeight = 0;
+        const distance = 500;
+        const timer = setInterval(() => {
+          const scrollHeight = document.body.scrollHeight;
+          window.scrollBy(0, distance);
+          totalHeight += distance;
+
+          if (totalHeight >= scrollHeight) {
+            clearInterval(timer);
+            resolve();
+          }
+        }, 300);
+      });
+    });
+
+    await page.waitForTimeout(2000);
+
+    // Step 1: Extract subcategory collection links
+    const subcategoryLinks: string[] = await page.$$eval(
+      'a[href^="/collections/"]',
+      (links) => [
+        ...new Set(
+          links
+            .map(link => (link as HTMLAnchorElement).getAttribute('href'))
+            .filter(Boolean)
+            .map(href => new URL(href!, 'https://www.optimumnutrition.co.in').href)
+        ),
+      ]
     );
 
-    if (productLinks.length === 0) {
-        console.warn("Could not find any product links. The ON website structure may have changed.");
+    // Optional: filter out protein/mass gainer/combo packs here based on URL
+    const filteredCategoryLinks = subcategoryLinks.filter(
+      url =>
+        !url.toLowerCase().includes("protein") &&
+        !url.toLowerCase().includes("mass") &&
+        !url.toLowerCase().includes("combo")
+    );
+
+    // Now extract all product links from each filtered subcategory
+    const productLinks: string[] = [];
+
+    for (const subUrl of filteredCategoryLinks) {
+      console.log(`Visiting subcategory: ${subUrl}`);
+      await page.goto(subUrl, { waitUntil: 'networkidle' });
+
+      const links = await page.$$eval(
+        'a.full-unstyled-link[href^="/products/"]',
+        (anchors, domain) =>
+          anchors.map((a) => `${domain}${(a as HTMLAnchorElement).getAttribute('href')}`),
+        OPTIMUM_NUTRITION_DOMAIN
+      );
+
+      productLinks.push(...links);
     }
 
-    const uniqueLinks = Array.from(new Set(productLinks)).slice(0, 1); // Process one for testing
+    if (productLinks.length === 0) {
+      console.warn("Could not find any product links. The ON website structure may have changed.");
+    }
+
+    const uniqueLinks = Array.from(new Set(productLinks));
+
     const scrapedProducts: ScrapedProduct[] = [];
 
     for (const url of uniqueLinks) {
       console.log(`Scraping product: ${url}`);
       await page.goto(url, { waitUntil: 'networkidle' });
 
-      // --- New Selector Logic for ON Product Image ---
-      // Finds the first/main image within the product media gallery.
       const productImageUrl = await page.$$eval('img.image-magnify-none', (imgs) => {
         const firstImg = imgs[0] as HTMLImageElement;
         return firstImg?.src || null;
@@ -72,9 +123,7 @@ export async function GET() {
         console.warn(`Could not find main product image for ${url}`);
         return null;
       });
-      
-      // --- New Selector Logic for ON Nutrition Image ---
-      // Using the exact 'alt' tag you identified. This is very reliable.
+
       const nutritionLabelImageUrl = await page
         .$eval('img[alt="nutritional-info"]', (el) => (el as HTMLImageElement).src)
         .catch(() => {
@@ -96,7 +145,6 @@ export async function GET() {
       });
     }
 
-    // --- Prisma logic remains intact ---
     for (const product of scrapedProducts) {
       if (product.nutritionData) {
         await prisma.supplement.upsert({
@@ -214,7 +262,6 @@ Analyze the provided image of a nutritional label.
 }
 
 async function fetchBase64(imageUrl: string): Promise<string> {
-  // The protocol-relative URL (starting with //) needs a protocol.
   const url = imageUrl.startsWith('//') ? `https:${imageUrl}` : imageUrl;
   const res = await fetch(url);
   if (!res.ok) {
