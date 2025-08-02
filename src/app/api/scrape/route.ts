@@ -3,7 +3,9 @@ import { chromium } from 'playwright';
 import prisma from '@/lib/prisma';
 import { Prisma } from '@/generated/prisma';
 
-const CATEGORY = 'https://www.muscleblaze.com/categories/proteins';
+// --- Configuration for Optimum Nutrition ---
+const OPTIMUM_NUTRITION_DOMAIN = 'https://www.optimumnutrition.co.in';
+const CATEGORY = `${OPTIMUM_NUTRITION_DOMAIN}/collections/protein-powder`; // Target URL for ON's protein category
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 interface Nutrient {
@@ -37,46 +39,52 @@ export async function GET() {
   const page = await browser.newPage();
 
   try {
+    console.log(`Navigating to category: ${CATEGORY}`);
     await page.goto(CATEGORY, { waitUntil: 'networkidle' });
     await page.evaluate(() => window.scrollBy(0, document.body.scrollHeight));
     await page.waitForTimeout(3000);
 
+    // --- New Selector Logic for ON Product Links ---
+    // Using the href structure you identified.
     const productLinks: string[] = await page.$$eval(
-      'a[href^="/sv/"]',
-      (anchors) => anchors.map((a) => (a as HTMLAnchorElement).href)
+      'a.full-unstyled-link[href^="/products/"]', // Targets links with the specific class and href
+      (anchors, domain) => anchors.map((a) => `${domain}${(a as HTMLAnchorElement).getAttribute('href')}`),
+      OPTIMUM_NUTRITION_DOMAIN // Pass the domain to the browser context
     );
-    
 
-    const uniqueLinks = Array.from(new Set(productLinks)).slice(0, 1);
+    if (productLinks.length === 0) {
+        console.warn("Could not find any product links. The ON website structure may have changed.");
+    }
+
+    const uniqueLinks = Array.from(new Set(productLinks)).slice(0, 1); // Process one for testing
     const scrapedProducts: ScrapedProduct[] = [];
 
     for (const url of uniqueLinks) {
       console.log(`Scraping product: ${url}`);
       await page.goto(url, { waitUntil: 'networkidle' });
 
-      const productImageUrl = await page.evaluate(() => {
-        const allImages = Array.from(document.querySelectorAll('img[src*="hkrtcdn"]'));
-      
-        const primary = allImages.find(img => {
-          const image = img as HTMLImageElement;
-          return image.naturalWidth > 200 && image.naturalHeight > 200;
-        });
-      
-        return primary?.getAttribute('src') || null;
+      // --- New Selector Logic for ON Product Image ---
+      // Finds the first/main image within the product media gallery.
+      const productImageUrl = await page.$$eval('img.image-magnify-none', (imgs) => {
+        const firstImg = imgs[0] as HTMLImageElement;
+        return firstImg?.src || null;
+      }).catch(() => {
+        console.warn(`Could not find main product image for ${url}`);
+        return null;
       });
       
-      
-
+      // --- New Selector Logic for ON Nutrition Image ---
+      // Using the exact 'alt' tag you identified. This is very reliable.
       const nutritionLabelImageUrl = await page
-        .$eval('div[class*="nutrition"] img', (el) => (el as HTMLImageElement).src)
+        .$eval('img[alt="nutritional-info"]', (el) => (el as HTMLImageElement).src)
         .catch(() => {
           console.warn(`Could not find nutrition label image for ${url}`);
           return null;
         });
 
       let nutritionData: NutritionData | null = null;
-
       if (nutritionLabelImageUrl) {
+        console.log(`Found nutrition label: ${nutritionLabelImageUrl}`);
         nutritionData = await extractNutritionViaGemini(nutritionLabelImageUrl);
       }
 
@@ -88,6 +96,7 @@ export async function GET() {
       });
     }
 
+    // --- Prisma logic remains intact ---
     for (const product of scrapedProducts) {
       if (product.nutritionData) {
         await prisma.supplement.upsert({
@@ -96,17 +105,14 @@ export async function GET() {
             productImageUrl: product.productImageUrl,
             nutritionLabelImageUrl: product.nutritionLabelImageUrl,
             nutritionData: product.nutritionData as unknown as Prisma.JsonObject,
-
           },
           create: {
             productUrl: product.productUrl,
             productImageUrl: product.productImageUrl,
             nutritionLabelImageUrl: product.nutritionLabelImageUrl,
             nutritionData: product.nutritionData as unknown as Prisma.JsonObject,
-
           },
         });
-
         console.log(`Saved/Updated: ${product.productUrl}`);
       } else {
         console.warn(`Skipping save for ${product.productUrl} due to missing nutrition data.`);
@@ -130,6 +136,7 @@ export async function GET() {
   }
 }
 
+// --- Gemini and fetchBase64 functions remain intact ---
 async function extractNutritionViaGemini(imageUrl: string): Promise<NutritionData | null> {
   const prompt = `
 Analyze the provided image of a nutritional label.
@@ -207,7 +214,9 @@ Analyze the provided image of a nutritional label.
 }
 
 async function fetchBase64(imageUrl: string): Promise<string> {
-  const res = await fetch(imageUrl);
+  // The protocol-relative URL (starting with //) needs a protocol.
+  const url = imageUrl.startsWith('//') ? `https:${imageUrl}` : imageUrl;
+  const res = await fetch(url);
   if (!res.ok) {
     throw new Error(`Failed to fetch image: ${res.statusText}`);
   }
