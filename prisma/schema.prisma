@@ -14,7 +14,8 @@ model Supplement {
   productUrl              String   @unique
   productImageUrl         String?
   nutritionLabelImageUrl  String?
-  nutritionData              Json?    // ✅ Rename to match your code
+  nutritionData              Json? 
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
+  price                   String?
 }
