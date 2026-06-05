@@ -21,6 +21,5 @@ export async function GET() {
   }
 
   const parsed = (data as Product[]).map(parseProduct)
-
   return NextResponse.json(parsed)
 }

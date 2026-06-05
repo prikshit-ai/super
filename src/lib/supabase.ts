@@ -16,6 +16,17 @@ export type Product = {
   updatedAt: string
 }
 
+export type Category =
+  | 'Protein Powder'
+  | 'Mass Gainer'
+  | 'Creatine'
+  | 'BCAA / EAA'
+  | 'Pre-Workout'
+  | 'Multivitamin'
+  | 'Fish Oil'
+  | 'ZMA / Minerals'
+  | 'Other'
+
 export type ParsedProduct = {
   id: number
   productUrl: string
@@ -26,9 +37,25 @@ export type ParsedProduct = {
   calories: number
   carbs: number
   fat: number
+  creatine: number
   servingSize: string
   servingsPerContainer: number
-  pricePerProtein: number
+  category: Category
+  primaryMetricLabel: string   // e.g. "₹/g protein"
+  primaryMetricValue: number   // the actual computed value
+}
+
+function detectCategory(url: string): Category {
+  const u = url.toLowerCase()
+  if (u.includes('mass-gainer') || u.includes('weight-gainer') || u.includes('serious-mass') || u.includes('pro-complex-gainer')) return 'Mass Gainer'
+  if (u.includes('creatine')) return 'Creatine'
+  if (u.includes('bcaa') || u.includes('eaa') || u.includes('amino')) return 'BCAA / EAA'
+  if (u.includes('pre-workout') || u.includes('preworkout') || u.includes('pre_workout')) return 'Pre-Workout'
+  if (u.includes('multivitamin') || u.includes('multi-vitamin') || u.includes('opti-men') || u.includes('opti-women')) return 'Multivitamin'
+  if (u.includes('fish-oil') || u.includes('omega') || u.includes('fishoil')) return 'Fish Oil'
+  if (u.includes('zma') || u.includes('zinc') || u.includes('magnesium') || u.includes('mineral')) return 'ZMA / Minerals'
+  if (u.includes('whey') || u.includes('casein') || u.includes('protein-powder') || u.includes('gold-standard') || u.includes('platinum')) return 'Protein Powder'
+  return 'Other'
 }
 
 export function parseProduct(product: Product): ParsedProduct {
@@ -36,11 +63,11 @@ export function parseProduct(product: Product): ParsedProduct {
   let calories = 0
   let carbs = 0
   let fat = 0
+  let creatine = 0
   let servingSize = ''
   let servingsPerContainer = 1
 
   try {
-    // Supabase returns JSONB columns already parsed — handle both cases
     const data = typeof product.nutritionData === 'string'
       ? JSON.parse(product.nutritionData)
       : product.nutritionData as Record<string, unknown>
@@ -63,12 +90,41 @@ export function parseProduct(product: Product): ParsedProduct {
     calories = find(['energy', 'calories'])
     carbs = find(['carbohydrate', 'carbs'])
     fat = find(['fat, total', 'total fat', 'fat'])
+    creatine = find(['creatine'])
 
   } catch (error) {
     console.error("Error parsing product ID:", product.id, error)
   }
 
   const price = parseFloat(product.price as string) || 0
+  const category = detectCategory(product.productUrl)
+
+  // Compute primary metric based on category
+  let primaryMetricLabel = ''
+  let primaryMetricValue = 0
+
+  if (category === 'Protein Powder') {
+    const total = protein * servingsPerContainer
+    primaryMetricLabel = '₹/g protein'
+    primaryMetricValue = total > 0 ? price / total : 0
+  } else if (category === 'Mass Gainer') {
+    const totalCals = calories * servingsPerContainer
+    primaryMetricLabel = '₹/100 kcal'
+    primaryMetricValue = totalCals > 0 ? (price / totalCals) * 100 : 0
+  } else if (category === 'Creatine') {
+    const totalCreatine = creatine > 0 ? creatine * servingsPerContainer : servingsPerContainer * 3 // fallback 3g/serving
+    primaryMetricLabel = '₹/g creatine'
+    primaryMetricValue = totalCreatine > 0 ? price / totalCreatine : 0
+  } else if (category === 'BCAA / EAA') {
+    const totalAmino = protein * servingsPerContainer
+    primaryMetricLabel = '₹/g amino'
+    primaryMetricValue = totalAmino > 0 ? price / totalAmino : price / servingsPerContainer
+  } else {
+    primaryMetricLabel = '₹/serving'
+    primaryMetricValue = servingsPerContainer > 0 ? price / servingsPerContainer : 0
+  }
+
+  // Also compute pricePerProtein for backward compat (used in scatter)
   const totalProtein = protein * servingsPerContainer
   const pricePerProtein = totalProtein > 0 ? price / totalProtein : 0
 
@@ -82,8 +138,14 @@ export function parseProduct(product: Product): ParsedProduct {
     calories,
     carbs,
     fat,
+    creatine,
     servingSize,
     servingsPerContainer,
+    category,
+    primaryMetricLabel,
+    primaryMetricValue,
+    // keep for scatter chart
+    ...(({ pricePerProtein: _ , ...rest }) => rest)({ pricePerProtein }),
     pricePerProtein,
   }
 }

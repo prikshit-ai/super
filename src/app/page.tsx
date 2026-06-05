@@ -3,186 +3,259 @@
 import { useEffect, useState, useMemo } from 'react'
 import {
   ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, BarChart, Bar, Cell, ReferenceLine, Legend
+  ResponsiveContainer, BarChart, Bar, Cell, ReferenceLine,
 } from 'recharts'
-import type { ParsedProduct } from '@/lib/supabase'
+import type { ParsedProduct, Category } from '@/lib/supabase'
 
-const GOLD = '#C9A84C'
-const DARK = '#0A0A0B'
-const CARD_BG = '#111114'
-const BORDER = '#1E1E24'
-const TEXT_PRIMARY = '#F0EDE6'
-const TEXT_MUTED = '#6B6872'
-const GREEN = '#4CAF82'
-const RED = '#E05A5A'
-
-// Custom scatter dot
-const ScatterDot = (props: { cx?: number; cy?: number; payload?: ParsedProduct; medianPPP?: number }) => {
-  const { cx = 0, cy = 0, payload, medianPPP = 0 } = props
-  const isGood = payload && payload.pricePerProtein < medianPPP
-  return (
-    <circle
-      cx={cx} cy={cy} r={5}
-      fill={isGood ? GREEN : GOLD}
-      fillOpacity={0.85}
-      stroke={isGood ? GREEN : GOLD}
-      strokeWidth={1}
-      style={{ cursor: 'pointer' }}
-    />
-  )
+// ─── Design tokens (light, professional) ────────────────────────────────────
+const C = {
+  bg:          '#F7F8FA',
+  surface:     '#FFFFFF',
+  surfaceAlt:  '#F0F2F5',
+  border:      '#E2E5EA',
+  borderStrong:'#C8CDD6',
+  text:        '#0D1117',
+  textMuted:   '#6B7280',
+  textLight:   '#9CA3AF',
+  accent:      '#2563EB',
+  accentLight: '#EFF6FF',
+  accentMid:   '#BFDBFE',
+  green:       '#059669',
+  greenLight:  '#ECFDF5',
+  red:         '#DC2626',
+  amber:       '#D97706',
+  amberLight:  '#FFFBEB',
 }
 
-const CustomScatterTooltip = ({ active, payload }: { active?: boolean; payload?: { payload: ParsedProduct }[] }) => {
-  if (!active || !payload?.length) return null
-  const p = payload[0].payload
-  return (
-    <div style={{
-      background: CARD_BG, border: `1px solid ${BORDER}`,
-      borderRadius: 8, padding: '12px 16px', fontSize: 13,
-      color: TEXT_PRIMARY, boxShadow: '0 8px 32px rgba(0,0,0,0.6)'
-    }}>
-      <div style={{ fontWeight: 700, marginBottom: 6, color: GOLD }}>Product #{p.id}</div>
-      <div>Price: <b>₹{p.price.toLocaleString()}</b></div>
-      <div>Protein/serving: <b>{p.protein}g</b></div>
-      <div>Servings: <b>{p.servingsPerContainer}</b></div>
-      <div>₹/g protein: <b>{p.pricePerProtein.toFixed(2)}</b></div>
-    </div>
-  )
+const CATEGORIES: Category[] = [
+  'Protein Powder', 'Mass Gainer', 'Creatine',
+  'BCAA / EAA', 'Pre-Workout', 'Multivitamin',
+  'Fish Oil', 'ZMA / Minerals', 'Other'
+]
+
+const CATEGORY_COLOR: Record<Category, string> = {
+  'Protein Powder': C.accent,
+  'Mass Gainer':    '#7C3AED',
+  'Creatine':       C.green,
+  'BCAA / EAA':     '#DB2777',
+  'Pre-Workout':    C.red,
+  'Multivitamin':   C.amber,
+  'Fish Oil':       '#0891B2',
+  'ZMA / Minerals': '#65A30D',
+  'Other':          C.textMuted,
 }
 
-const CustomBarTooltip = ({ active, payload, label }: { active?: boolean; payload?: { value: number }[]; label?: string }) => {
-  if (!active || !payload?.length) return null
-  return (
-    <div style={{
-      background: CARD_BG, border: `1px solid ${BORDER}`,
-      borderRadius: 8, padding: '10px 14px', fontSize: 13, color: TEXT_PRIMARY
-    }}>
-      <div style={{ color: TEXT_MUTED, marginBottom: 4 }}>Price Range</div>
-      <div style={{ fontWeight: 700 }}>₹{label}</div>
-      <div>{payload[0].value} products</div>
-    </div>
-  )
-}
-
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 function buildHistogram(products: ParsedProduct[], bucketSize = 500) {
   if (!products.length) return []
   const max = Math.max(...products.map(p => p.price))
   const min = Math.min(...products.map(p => p.price))
-  const buckets: { label: string; count: number; start: number }[] = []
+  const buckets: { label: string; count: number }[] = []
   for (let start = Math.floor(min / bucketSize) * bucketSize; start <= max; start += bucketSize) {
-    const end = start + bucketSize
-    buckets.push({
-      label: `${start}–${end}`,
-      start,
-      count: products.filter(p => p.price >= start && p.price < end).length
-    })
+    const count = products.filter(p => p.price >= start && p.price < start + bucketSize).length
+    if (count > 0) buckets.push({ label: `₹${start / 1000}k`, count })
   }
-  return buckets.filter(b => b.count > 0)
+  return buckets
 }
 
+// ─── Stat Card ────────────────────────────────────────────────────────────────
+function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div style={{
+      background: C.surface, border: `1px solid ${C.border}`,
+      borderRadius: 12, padding: '20px 24px',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
+    }}>
+      <div style={{ fontSize: 11, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6, fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 800, color: C.text, letterSpacing: '-0.02em' }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.textLight, marginTop: 3 }}>{sub}</div>}
+    </div>
+  )
+}
+
+// ─── Tooltip components ──────────────────────────────────────────────────────
+const TooltipBox = ({ children }: { children: React.ReactNode }) => (
+  <div style={{
+    background: C.surface, border: `1px solid ${C.border}`,
+    borderRadius: 10, padding: '12px 16px', fontSize: 13,
+    color: C.text, boxShadow: '0 8px 24px rgba(0,0,0,0.12)'
+  }}>{children}</div>
+)
+
+const ScatterTooltip = ({ active, payload }: { active?: boolean; payload?: { payload: ParsedProduct }[] }) => {
+  if (!active || !payload?.length) return null
+  const p = payload[0].payload
+  return (
+    <TooltipBox>
+      <div style={{ fontWeight: 700, marginBottom: 6, color: C.accent }}>#{p.id} · {p.category}</div>
+      <div style={{ color: C.textMuted }}>Price: <b style={{ color: C.text }}>₹{p.price.toLocaleString()}</b></div>
+      <div style={{ color: C.textMuted }}>{p.primaryMetricLabel}: <b style={{ color: C.text }}>₹{p.primaryMetricValue.toFixed(2)}</b></div>
+      <div style={{ color: C.textMuted }}>Servings: <b style={{ color: C.text }}>{p.servingsPerContainer}</b></div>
+    </TooltipBox>
+  )
+}
+
+const BarTooltip = ({ active, payload, label }: { active?: boolean; payload?: { value: number }[]; label?: string }) => {
+  if (!active || !payload?.length) return null
+  return (
+    <TooltipBox>
+      <div style={{ color: C.textMuted, marginBottom: 2 }}>Price bracket</div>
+      <div style={{ fontWeight: 700 }}>{label}</div>
+      <div style={{ color: C.textMuted }}>{payload[0].value} products</div>
+    </TooltipBox>
+  )
+}
+
+// ─── Category-aware card fields ───────────────────────────────────────────────
+function getCategoryFields(p: ParsedProduct) {
+  switch (p.category) {
+    case 'Protein Powder':
+      return [
+        { label: 'Protein/serving', value: `${p.protein}g`, highlight: true },
+        { label: 'Calories', value: `${p.calories} kcal` },
+        { label: 'Carbs', value: `${p.carbs}g` },
+        { label: 'Fat', value: `${p.fat}g` },
+      ]
+    case 'Mass Gainer':
+      return [
+        { label: 'Calories/serving', value: `${p.calories} kcal`, highlight: true },
+        { label: 'Carbs', value: `${p.carbs}g`, highlight: true },
+        { label: 'Protein', value: `${p.protein}g` },
+        { label: 'Fat', value: `${p.fat}g` },
+      ]
+    case 'Creatine':
+      return [
+        { label: 'Creatine/serving', value: p.creatine > 0 ? `${p.creatine}g` : '~3g (est.)', highlight: true },
+        { label: 'Servings', value: `${p.servingsPerContainer}` },
+        { label: 'Calories', value: `${p.calories} kcal` },
+        { label: 'Carbs', value: `${p.carbs}g` },
+      ]
+    case 'BCAA / EAA':
+      return [
+        { label: 'Amino/serving', value: `${p.protein}g`, highlight: true },
+        { label: 'Calories', value: `${p.calories} kcal` },
+        { label: 'Carbs', value: `${p.carbs}g` },
+        { label: 'Servings', value: `${p.servingsPerContainer}` },
+      ]
+    case 'Pre-Workout':
+      return [
+        { label: 'Servings', value: `${p.servingsPerContainer}`, highlight: true },
+        { label: 'Calories', value: `${p.calories} kcal` },
+        { label: 'Carbs', value: `${p.carbs}g` },
+        { label: 'Protein', value: `${p.protein}g` },
+      ]
+    default:
+      return [
+        { label: 'Servings', value: `${p.servingsPerContainer}`, highlight: true },
+        { label: 'Calories', value: `${p.calories} kcal` },
+        { label: 'Carbs', value: `${p.carbs}g` },
+        { label: 'Fat', value: `${p.fat}g` },
+      ]
+  }
+}
+
+// ─── Product Card ─────────────────────────────────────────────────────────────
 function ProductCard({ product, rank }: { product: ParsedProduct; rank: number }) {
   const [showLabel, setShowLabel] = useState(false)
+  const catColor = CATEGORY_COLOR[product.category]
+  const fields = getCategoryFields(product)
 
-  const getRankBadge = () => {
-    if (rank === 1) return { label: '🥇 Best Value', color: GOLD }
-    if (rank === 2) return { label: '🥈 2nd Best', color: '#A8A8B3' }
-    if (rank === 3) return { label: '🥉 3rd Best', color: '#C97D4E' }
-    return null
-  }
-  const badge = getRankBadge()
+  const badge = rank === 1 ? '🥇 Best Value' : rank === 2 ? '🥈 2nd' : rank === 3 ? '🥉 3rd' : null
 
   return (
     <div style={{
-      background: CARD_BG, border: `1px solid ${BORDER}`,
-      borderRadius: 12, overflow: 'hidden',
-      transition: 'transform 0.2s, box-shadow 0.2s',
-      position: 'relative',
+      background: C.surface, border: `1px solid ${C.border}`,
+      borderRadius: 14, overflow: 'hidden',
+      transition: 'transform 0.15s, box-shadow 0.15s',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
     }}
       onMouseEnter={e => {
-        (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-4px)'
-        ;(e.currentTarget as HTMLDivElement).style.boxShadow = `0 16px 40px rgba(0,0,0,0.5), 0 0 0 1px ${GOLD}40`
+        (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-3px)'
+        ;(e.currentTarget as HTMLDivElement).style.boxShadow = '0 12px 32px rgba(0,0,0,0.1)'
       }}
       onMouseLeave={e => {
         (e.currentTarget as HTMLDivElement).style.transform = 'translateY(0)'
-        ;(e.currentTarget as HTMLDivElement).style.boxShadow = 'none'
+        ;(e.currentTarget as HTMLDivElement).style.boxShadow = '0 1px 3px rgba(0,0,0,0.06)'
       }}
     >
-      {badge && (
-        <div style={{
-          position: 'absolute', top: 10, left: 10, zIndex: 2,
-          background: badge.color, color: '#000', fontSize: 11,
-          fontWeight: 800, padding: '3px 8px', borderRadius: 6,
-          letterSpacing: '0.03em'
-        }}>{badge.label}</div>
-      )}
+      {/* Category strip */}
+      <div style={{ height: 4, background: catColor }} />
 
-      <div style={{ position: 'relative', height: 200, background: '#0D0D10', cursor: 'pointer' }}
+      <div style={{ position: 'relative', height: 190, background: C.surfaceAlt, cursor: 'pointer' }}
         onClick={() => setShowLabel(!showLabel)}>
-        {showLabel && product.nutritionLabelImageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={product.nutritionLabelImageUrl} alt="Nutrition Label"
-            style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-        ) : (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={product.productImageUrl} alt="Product"
-            style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+        {badge && (
+          <div style={{
+            position: 'absolute', top: 10, left: 10, zIndex: 2,
+            background: C.text, color: '#fff', fontSize: 10,
+            fontWeight: 700, padding: '3px 8px', borderRadius: 20,
+          }}>{badge}</div>
         )}
         <div style={{
+          position: 'absolute', top: 10, right: 10, zIndex: 2,
+          background: catColor + '20', color: catColor,
+          fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 20,
+          border: `1px solid ${catColor}40`
+        }}>{product.category}</div>
+
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={showLabel && product.nutritionLabelImageUrl ? product.nutritionLabelImageUrl : product.productImageUrl}
+          alt="Product"
+          style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 8 }}
+        />
+        <div style={{
           position: 'absolute', bottom: 8, right: 8,
-          background: 'rgba(0,0,0,0.7)', color: TEXT_MUTED,
-          fontSize: 10, padding: '2px 6px', borderRadius: 4,
-          backdropFilter: 'blur(4px)'
+          background: 'rgba(0,0,0,0.5)', color: '#fff',
+          fontSize: 9, padding: '2px 6px', borderRadius: 4,
         }}>
-          {showLabel ? 'Click: product' : 'Click: nutrition label'}
+          {showLabel ? 'Show product' : 'Show label'}
         </div>
       </div>
 
       <div style={{ padding: '16px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-          <div style={{ fontSize: 22, fontWeight: 800, color: TEXT_PRIMARY, fontFamily: 'Georgia, serif' }}>
+        {/* Price + metric */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div style={{ fontSize: 20, fontWeight: 800, color: C.text, letterSpacing: '-0.02em' }}>
             ₹{product.price.toLocaleString()}
           </div>
           <div style={{
-            background: '#1A1A20', borderRadius: 8, padding: '4px 10px',
-            fontSize: 12, color: GOLD, fontWeight: 700
+            background: C.accentLight, borderRadius: 8, padding: '4px 10px',
+            fontSize: 12, color: C.accent, fontWeight: 700,
+            border: `1px solid ${C.accentMid}`
           }}>
-            ₹{product.pricePerProtein.toFixed(2)}/g protein
+            ₹{product.primaryMetricValue.toFixed(2)} {product.primaryMetricLabel.replace('₹/', '')}
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
-          {[
-            { label: 'Protein', value: `${product.protein}g`, highlight: true },
-            { label: 'Calories', value: `${product.calories} kcal`, highlight: false },
-            { label: 'Carbs', value: `${product.carbs}g`, highlight: false },
-            { label: 'Fat', value: `${product.fat}g`, highlight: false },
-          ].map(item => (
-            <div key={item.label} style={{
-              background: item.highlight ? '#1A2419' : '#13131A',
-              borderRadius: 6, padding: '8px 10px',
-              border: item.highlight ? `1px solid ${GREEN}30` : `1px solid ${BORDER}`
+        {/* Fields grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 12 }}>
+          {fields.map(f => (
+            <div key={f.label} style={{
+              background: f.highlight ? C.accentLight : C.surfaceAlt,
+              borderRadius: 8, padding: '8px 10px',
+              border: `1px solid ${f.highlight ? C.accentMid : C.border}`
             }}>
-              <div style={{ fontSize: 10, color: TEXT_MUTED, marginBottom: 2, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{item.label}</div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: item.highlight ? GREEN : TEXT_PRIMARY }}>{item.value}</div>
+              <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 2, textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>{f.label}</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: f.highlight ? C.accent : C.text }}>{f.value}</div>
             </div>
           ))}
         </div>
 
-        <div style={{ fontSize: 11, color: TEXT_MUTED, marginBottom: 10 }}>
+        <div style={{ fontSize: 11, color: C.textLight, marginBottom: 12 }}>
           {product.servingSize} · {product.servingsPerContainer} servings
         </div>
 
         <a href={product.productUrl} target="_blank" rel="noopener noreferrer"
           style={{
             display: 'block', textAlign: 'center',
-            background: 'transparent', border: `1px solid ${GOLD}60`,
-            color: GOLD, padding: '8px', borderRadius: 8,
+            background: C.text, color: '#fff',
+            padding: '9px', borderRadius: 8,
             fontSize: 12, fontWeight: 700, textDecoration: 'none',
-            letterSpacing: '0.05em', textTransform: 'uppercase',
-            transition: 'background 0.2s'
+            letterSpacing: '0.04em',
+            transition: 'opacity 0.15s'
           }}
-          onMouseEnter={e => (e.currentTarget.style.background = `${GOLD}15`)}
-          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+          onMouseEnter={e => (e.currentTarget.style.opacity = '0.85')}
+          onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
         >
           View Product →
         </a>
@@ -191,13 +264,51 @@ function ProductCard({ product, rank }: { product: ParsedProduct; rank: number }
   )
 }
 
+// ─── Value comparison chart (category-aware) ──────────────────────────────────
+function ValueChart({ products, category }: { products: ParsedProduct[]; category: Category | 'All' }) {
+  const data = useMemo(() => {
+    const list = (category === 'All' ? products : products.filter(p => p.category === category))
+      .filter(p => p.primaryMetricValue > 0)
+      .sort((a, b) => a.primaryMetricValue - b.primaryMetricValue)
+      .slice(0, 20)
+      .map((p, i) => ({ name: `#${p.id}`, value: parseFloat(p.primaryMetricValue.toFixed(2)), rank: i, cat: p.category }))
+    return list
+  }, [products, category])
+
+  const label = data[0] ? products.find(p => `#${p.id}` === data[0]?.name)?.primaryMetricLabel ?? '₹/serving' : '₹/serving'
+  const catColor = category !== 'All' ? CATEGORY_COLOR[category] : C.accent
+
+  if (!data.length) return null
+
+  return (
+    <ResponsiveContainer width="100%" height={Math.max(180, data.length * 26)}>
+      <BarChart data={data} layout="vertical" margin={{ left: 40, right: 30, top: 4, bottom: 20 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+        <XAxis type="number" stroke={C.textMuted} tick={{ fontSize: 10 }}
+          label={{ value: label, position: 'insideBottom', offset: -12, fill: C.textMuted, fontSize: 11 }} />
+        <YAxis type="category" dataKey="name" stroke={C.textMuted} tick={{ fontSize: 10 }} width={38} />
+        <Tooltip
+          formatter={(v: number) => [`₹${v}`, label]}
+          contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13 }}
+        />
+        <Bar dataKey="value" radius={[0, 6, 6, 0]}>
+          {data.map((_, i) => (
+            <Cell key={i} fill={i === 0 ? C.green : i < 5 ? catColor : catColor + '88'} />
+          ))}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
+
+// ─── Main Dashboard ───────────────────────────────────────────────────────────
 export default function Dashboard() {
   const [products, setProducts] = useState<ParsedProduct[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [category, setCategory] = useState<Category | 'All'>('All')
   const [search, setSearch] = useState('')
-  const [sortBy, setSortBy] = useState<'price' | 'protein' | 'value'>('value')
-  const [maxPrice, setMaxPrice] = useState(10000)
+  const [sortBy, setSortBy] = useState<'price' | 'value'>('value')
 
   useEffect(() => {
     fetch('/api/products')
@@ -205,164 +316,178 @@ export default function Dashboard() {
       .then(data => {
         if (data.error) throw new Error(data.error)
         setProducts(data)
-        const max = Math.max(...data.map((p: ParsedProduct) => p.price))
-        setMaxPrice(max)
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
   }, [])
 
+  const categoryProducts = useMemo(() =>
+    category === 'All' ? products : products.filter(p => p.category === category),
+    [products, category]
+  )
+
   const stats = useMemo(() => {
-    if (!products.length) return null
-    const prices = products.map(p => p.price)
-    const ppp = products.map(p => p.pricePerProtein).filter(v => v > 0)
+    if (!categoryProducts.length) return null
+    const prices = categoryProducts.map(p => p.price)
+    const metrics = categoryProducts.map(p => p.primaryMetricValue).filter(v => v > 0)
+    const sorted = [...metrics].sort((a, b) => a - b)
     return {
-      avgPrice: prices.reduce((a, b) => a + b, 0) / prices.length,
+      total: categoryProducts.length,
       minPrice: Math.min(...prices),
       maxPrice: Math.max(...prices),
-      avgPPP: ppp.reduce((a, b) => a + b, 0) / ppp.length,
-      medianPPP: ppp.sort((a, b) => a - b)[Math.floor(ppp.length / 2)],
-      total: products.length,
+      avgPrice: prices.reduce((a, b) => a + b, 0) / prices.length,
+      bestMetric: sorted[0] ?? 0,
+      avgMetric: metrics.reduce((a, b) => a + b, 0) / (metrics.length || 1),
+      metricLabel: categoryProducts[0]?.primaryMetricLabel ?? '₹/serving',
     }
-  }, [products])
+  }, [categoryProducts])
 
   const filtered = useMemo(() => {
-    let list = [...products]
-    if (search) list = list.filter(p => p.id.toString().includes(search))
-    return list.sort((a, b) => {
-      if (sortBy === 'price') return a.price - b.price
-      if (sortBy === 'protein') return b.protein - a.protein
-      return a.pricePerProtein - b.pricePerProtein
+    let list = [...categoryProducts]
+    if (search) list = list.filter(p =>
+      p.id.toString().includes(search) ||
+      p.category.toLowerCase().includes(search.toLowerCase())
+    )
+    return list.sort((a, b) =>
+      sortBy === 'price' ? a.price - b.price : a.primaryMetricValue - b.primaryMetricValue
+    )
+  }, [categoryProducts, search, sortBy])
+
+  const histogram = useMemo(() => buildHistogram(categoryProducts), [categoryProducts])
+
+  const categoryCounts = useMemo(() => {
+    const counts: Partial<Record<Category | 'All', number>> = { All: products.length }
+    CATEGORIES.forEach(c => {
+      counts[c] = products.filter(p => p.category === c).length
     })
-  }, [products, search, sortBy])
-
-  const histogram = useMemo(() => buildHistogram(products), [products])
-
-  const scatterData = useMemo(() => products.filter(p => p.protein > 0), [products])
+    return counts
+  }, [products])
 
   if (loading) return (
-    <div style={{ minHeight: '100vh', background: DARK, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ textAlign: 'center', color: TEXT_MUTED }}>
-        <div style={{ fontSize: 40, marginBottom: 16, animation: 'spin 1s linear infinite' }}>⟳</div>
-        <div style={{ fontSize: 16 }}>Loading dashboard…</div>
-        <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+    <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ textAlign: 'center', color: C.textMuted }}>
+        <div style={{ fontSize: 32, marginBottom: 12 }}>⟳</div>
+        <div style={{ fontSize: 15, fontWeight: 500 }}>Loading…</div>
       </div>
     </div>
   )
 
   if (error) return (
-    <div style={{ minHeight: '100vh', background: DARK, display: 'flex', alignItems: 'center', justifyContent: 'center', color: RED }}>
+    <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.red }}>
       <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: 40, marginBottom: 12 }}>⚠</div>
-        <div style={{ fontSize: 18, fontWeight: 700 }}>Connection Error</div>
-        <div style={{ fontSize: 14, color: TEXT_MUTED, marginTop: 8 }}>{error}</div>
+        <div style={{ fontSize: 32, marginBottom: 8 }}>⚠</div>
+        <div style={{ fontWeight: 700 }}>Error: {error}</div>
       </div>
     </div>
   )
 
   return (
-    <div style={{ minHeight: '100vh', background: DARK, color: TEXT_PRIMARY, fontFamily: 'system-ui, sans-serif' }}>
+    <div style={{ minHeight: '100vh', background: C.bg, color: C.text, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>
+
       {/* Header */}
       <header style={{
-        borderBottom: `1px solid ${BORDER}`,
-        padding: '24px 32px',
+        background: C.surface, borderBottom: `1px solid ${C.border}`,
+        padding: '0 32px', height: 60,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        background: `${CARD_BG}CC`, backdropFilter: 'blur(10px)',
-        position: 'sticky', top: 0, zIndex: 100
+        position: 'sticky', top: 0, zIndex: 100,
+        boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
       }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 2 }}>
-            <div style={{
-              width: 32, height: 32, borderRadius: 8,
-              background: `linear-gradient(135deg, ${GOLD}, #8B6914)`,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 16
-            }}>💪</div>
-            <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, fontFamily: 'Georgia, serif', letterSpacing: '-0.02em' }}>
-              ON Nutrition <span style={{ color: GOLD }}>Price Intelligence</span>
-            </h1>
-          </div>
-          <p style={{ margin: 0, fontSize: 12, color: TEXT_MUTED }}>
-            Scraped {stats?.total ?? 0} Optimum Nutrition products · Find your best ₹/protein ratio
-          </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{
+            width: 28, height: 28, borderRadius: 8,
+            background: C.accent,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 14, color: '#fff'
+          }}>💪</div>
+          <span style={{ fontSize: 16, fontWeight: 800, letterSpacing: '-0.02em' }}>
+            ON Nutrition <span style={{ color: C.accent }}>Intelligence</span>
+          </span>
+          <span style={{ fontSize: 12, color: C.textMuted, marginLeft: 4 }}>
+            · {products.length} products scraped
+          </span>
         </div>
-        <div style={{ fontSize: 12, color: TEXT_MUTED, textAlign: 'right' }}>
-          <div style={{ color: GREEN, fontWeight: 700, fontSize: 14 }}>● Live</div>
-          <div>Supabase + Next.js</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ width: 7, height: 7, borderRadius: '50%', background: C.green }} />
+          <span style={{ fontSize: 12, color: C.textMuted, fontWeight: 500 }}>Live · Supabase</span>
         </div>
       </header>
 
-      <main style={{ maxWidth: 1400, margin: '0 auto', padding: '32px 24px' }}>
+      <main style={{ maxWidth: 1440, margin: '0 auto', padding: '28px 24px' }}>
 
-        {/* Stats Bar */}
+        {/* Category filter */}
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ fontSize: 11, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, marginBottom: 10 }}>
+            Filter by Category
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {(['All', ...CATEGORIES] as (Category | 'All')[]).map(cat => {
+              const active = category === cat
+              const color = cat === 'All' ? C.accent : CATEGORY_COLOR[cat as Category]
+              const count = categoryCounts[cat] ?? 0
+              if (count === 0 && cat !== 'All') return null
+              return (
+                <button key={cat} onClick={() => setCategory(cat)}
+                  style={{
+                    padding: '6px 14px', borderRadius: 20, fontSize: 12, fontWeight: 600,
+                    border: `1px solid ${active ? color : C.border}`,
+                    background: active ? color : C.surface,
+                    color: active ? '#fff' : C.textMuted,
+                    cursor: 'pointer', transition: 'all 0.15s',
+                    boxShadow: active ? `0 2px 8px ${color}40` : 'none'
+                  }}>
+                  {cat} <span style={{ opacity: 0.7, fontSize: 11 }}>({count})</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Stats */}
         {stats && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 32 }}>
-            {[
-              { label: 'Products Scraped', value: stats.total.toString(), icon: '📦' },
-              { label: 'Price Range', value: `₹${stats.minPrice.toLocaleString()} – ₹${stats.maxPrice.toLocaleString()}`, icon: '💰' },
-              { label: 'Avg Price', value: `₹${Math.round(stats.avgPrice).toLocaleString()}`, icon: '📊' },
-              { label: 'Best ₹/g Protein', value: `₹${Math.min(...products.filter(p=>p.pricePerProtein>0).map(p=>p.pricePerProtein)).toFixed(2)}`, icon: '🏆' },
-              { label: 'Avg ₹/g Protein', value: `₹${stats.avgPPP.toFixed(2)}`, icon: '⚖️' },
-            ].map(s => (
-              <div key={s.label} style={{
-                background: CARD_BG, border: `1px solid ${BORDER}`,
-                borderRadius: 10, padding: '16px 20px'
-              }}>
-                <div style={{ fontSize: 20, marginBottom: 6 }}>{s.icon}</div>
-                <div style={{ fontSize: 11, color: TEXT_MUTED, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>{s.label}</div>
-                <div style={{ fontSize: 18, fontWeight: 800, color: TEXT_PRIMARY, fontFamily: 'Georgia, serif' }}>{s.value}</div>
-              </div>
-            ))}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 24 }}>
+            <StatCard label="Products" value={stats.total.toString()} />
+            <StatCard label="Price Range" value={`₹${stats.minPrice.toLocaleString()}`} sub={`up to ₹${stats.maxPrice.toLocaleString()}`} />
+            <StatCard label="Avg Price" value={`₹${Math.round(stats.avgPrice).toLocaleString()}`} />
+            <StatCard label={`Best ${stats.metricLabel}`} value={`₹${stats.bestMetric.toFixed(2)}`} />
+            <StatCard label={`Avg ${stats.metricLabel}`} value={`₹${stats.avgMetric.toFixed(2)}`} />
           </div>
         )}
 
-        {/* Charts Row */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 32 }}>
+        {/* Charts */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
 
-          {/* Scatter Chart */}
-          <div style={{ background: CARD_BG, border: `1px solid ${BORDER}`, borderRadius: 12, padding: '24px' }}>
-            <h2 style={{ margin: '0 0 4px', fontSize: 16, fontWeight: 700, fontFamily: 'Georgia, serif' }}>
-              Price vs Protein Per Serving
-            </h2>
-            <p style={{ margin: '0 0 20px', fontSize: 12, color: TEXT_MUTED }}>
-              <span style={{ color: GREEN }}>●</span> Below median value &nbsp;
-              <span style={{ color: GOLD }}>●</span> Above median value
-            </p>
-            <ResponsiveContainer width="100%" height={300}>
-              <ScatterChart>
-                <CartesianGrid strokeDasharray="3 3" stroke={BORDER} />
-                <XAxis dataKey="price" name="Price (₹)" stroke={TEXT_MUTED} tick={{ fontSize: 11 }}
-                  label={{ value: 'Price (₹)', position: 'insideBottom', offset: -5, fill: TEXT_MUTED, fontSize: 11 }} />
-                <YAxis dataKey="protein" name="Protein (g)" stroke={TEXT_MUTED} tick={{ fontSize: 11 }}
-                  label={{ value: 'Protein/serving (g)', angle: -90, position: 'insideLeft', fill: TEXT_MUTED, fontSize: 11 }} />
-                <Tooltip content={<CustomScatterTooltip />} />
-                <Scatter
-                  data={scatterData}
-                  shape={(props: Record<string, unknown>) => (
-                    <ScatterDot {...props as { cx?: number; cy?: number; payload?: ParsedProduct }} medianPPP={stats?.medianPPP ?? 0} />
-                  )}
-                />
-              </ScatterChart>
-            </ResponsiveContainer>
+          {/* Value chart */}
+          <div style={{
+            background: C.surface, border: `1px solid ${C.border}`,
+            borderRadius: 14, padding: '22px 24px',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
+          }}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 2 }}>
+              {category === 'All' ? 'Best Value Across All Categories' : `Best Value — ${category}`}
+            </div>
+            <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 16 }}>
+              Top 20 by {stats?.metricLabel ?? '₹/serving'} · Lower is better
+            </div>
+            <ValueChart products={products} category={category} />
           </div>
 
-          {/* Histogram */}
-          <div style={{ background: CARD_BG, border: `1px solid ${BORDER}`, borderRadius: 12, padding: '24px' }}>
-            <h2 style={{ margin: '0 0 4px', fontSize: 16, fontWeight: 700, fontFamily: 'Georgia, serif' }}>
-              Price Distribution
-            </h2>
-            <p style={{ margin: '0 0 20px', fontSize: 12, color: TEXT_MUTED }}>
-              Number of products by price bracket
-            </p>
-            <ResponsiveContainer width="100%" height={300}>
+          {/* Price distribution */}
+          <div style={{
+            background: C.surface, border: `1px solid ${C.border}`,
+            borderRadius: 14, padding: '22px 24px',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
+          }}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 2 }}>Price Distribution</div>
+            <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 16 }}>Products per price bracket</div>
+            <ResponsiveContainer width="100%" height={260}>
               <BarChart data={histogram}>
-                <CartesianGrid strokeDasharray="3 3" stroke={BORDER} />
-                <XAxis dataKey="label" stroke={TEXT_MUTED} tick={{ fontSize: 10 }} />
-                <YAxis stroke={TEXT_MUTED} tick={{ fontSize: 11 }} />
-                <Tooltip content={<CustomBarTooltip />} />
-                <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                  {histogram.map((entry, idx) => (
-                    <Cell key={idx} fill={idx % 2 === 0 ? GOLD : `${GOLD}88`} />
+                <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+                <XAxis dataKey="label" stroke={C.textMuted} tick={{ fontSize: 10 }} />
+                <YAxis stroke={C.textMuted} tick={{ fontSize: 11 }} />
+                <Tooltip content={<BarTooltip />} />
+                <Bar dataKey="count" radius={[4, 4, 0, 0]} fill={C.accent}>
+                  {histogram.map((_, i) => (
+                    <Cell key={i} fill={i % 2 === 0 ? C.accent : C.accentMid} />
                   ))}
                 </Bar>
               </BarChart>
@@ -370,83 +495,81 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Price per Protein Bar */}
-        <div style={{ background: CARD_BG, border: `1px solid ${BORDER}`, borderRadius: 12, padding: '24px', marginBottom: 32 }}>
-          <h2 style={{ margin: '0 0 4px', fontSize: 16, fontWeight: 700, fontFamily: 'Georgia, serif' }}>
-            ₹ per Gram of Protein — Best to Worst Value
-          </h2>
-          <p style={{ margin: '0 0 20px', fontSize: 12, color: TEXT_MUTED }}>
-            Lower = better value. Products with valid protein data only.
-          </p>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart
-              data={[...products].filter(p => p.pricePerProtein > 0)
-                .sort((a, b) => a.pricePerProtein - b.pricePerProtein)
-                .slice(0, 30)
-                .map((p, i) => ({ name: `#${p.id}`, value: parseFloat(p.pricePerProtein.toFixed(2)), rank: i }))}
-              layout="vertical"
-              margin={{ left: 40, right: 20 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke={BORDER} />
-              <XAxis type="number" stroke={TEXT_MUTED} tick={{ fontSize: 10 }}
-                label={{ value: '₹/g protein', position: 'insideBottom', offset: -4, fill: TEXT_MUTED, fontSize: 11 }} />
-              <YAxis type="category" dataKey="name" stroke={TEXT_MUTED} tick={{ fontSize: 10 }} width={40} />
-              <Tooltip
-                formatter={(v: number) => [`₹${v}`, '₹/g protein']}
-                contentStyle={{ background: CARD_BG, border: `1px solid ${BORDER}`, borderRadius: 8, color: TEXT_PRIMARY }}
-              />
-              {stats && <ReferenceLine x={stats.medianPPP} stroke={RED} strokeDasharray="4 2"
-                label={{ value: 'Median', fill: RED, fontSize: 10 }} />}
-              <Bar dataKey="value" radius={[0, 4, 4, 0]}>
-                {[...Array(30)].map((_, i) => (
-                  <Cell key={i} fill={i < 5 ? GREEN : i < 15 ? GOLD : `${GOLD}55`} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        {/* Scatter — only for categories that have protein data */}
+        {(category === 'All' || category === 'Protein Powder' || category === 'Mass Gainer' || category === 'BCAA / EAA') && (
+          <div style={{
+            background: C.surface, border: `1px solid ${C.border}`,
+            borderRadius: 14, padding: '22px 24px', marginBottom: 24,
+            boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
+          }}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 2 }}>Price vs Protein Per Serving</div>
+            <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 16 }}>
+              Scatter of price against protein content
+            </div>
+            <ResponsiveContainer width="100%" height={280}>
+              <ScatterChart>
+                <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+                <XAxis dataKey="price" name="Price (₹)" stroke={C.textMuted} tick={{ fontSize: 11 }}
+                  label={{ value: 'Price (₹)', position: 'insideBottom', offset: -5, fill: C.textMuted, fontSize: 11 }} />
+                <YAxis dataKey="protein" name="Protein (g)" stroke={C.textMuted} tick={{ fontSize: 11 }}
+                  label={{ value: 'Protein/serving (g)', angle: -90, position: 'insideLeft', fill: C.textMuted, fontSize: 11 }} />
+                <Tooltip content={<ScatterTooltip />} />
+                <Scatter
+                  data={categoryProducts.filter(p => p.protein > 0)}
+                  shape={(props: Record<string, unknown>) => {
+                    const { cx = 0, cy = 0, payload } = props as { cx?: number; cy?: number; payload?: ParsedProduct }
+                    const color = payload ? CATEGORY_COLOR[payload.category] : C.accent
+                    return <circle cx={cx} cy={cy} r={5} fill={color} fillOpacity={0.8} stroke={color} strokeWidth={1} style={{ cursor: 'pointer' }} />
+                  }}
+                />
+              </ScatterChart>
+            </ResponsiveContainer>
+          </div>
+        )}
 
-        {/* Product Grid */}
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 20 }}>
-            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, fontFamily: 'Georgia, serif', flex: 1 }}>
-              All Products
-            </h2>
+        {/* Product grid */}
+        <div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
+            <div style={{ fontSize: 18, fontWeight: 800, flex: 1, letterSpacing: '-0.01em' }}>
+              {category === 'All' ? 'All Products' : category}
+              <span style={{ fontSize: 13, color: C.textMuted, fontWeight: 400, marginLeft: 8 }}>{filtered.length} products</span>
+            </div>
             <input
-              placeholder="Search by ID…"
+              placeholder="Search…"
               value={search}
               onChange={e => setSearch(e.target.value)}
               style={{
-                background: CARD_BG, border: `1px solid ${BORDER}`,
-                borderRadius: 8, padding: '8px 14px', color: TEXT_PRIMARY,
-                fontSize: 13, width: 160, outline: 'none'
+                background: C.surface, border: `1px solid ${C.border}`,
+                borderRadius: 8, padding: '8px 14px', color: C.text,
+                fontSize: 13, width: 160, outline: 'none',
+                boxShadow: '0 1px 2px rgba(0,0,0,0.04)'
               }}
             />
-            <div style={{ display: 'flex', gap: 8 }}>
-              {(['value', 'price', 'protein'] as const).map(s => (
-                <button key={s} onClick={() => setSortBy(s)}
-                  style={{
-                    padding: '8px 16px', borderRadius: 8, fontSize: 12, fontWeight: 700,
-                    border: `1px solid ${sortBy === s ? GOLD : BORDER}`,
-                    background: sortBy === s ? `${GOLD}20` : 'transparent',
-                    color: sortBy === s ? GOLD : TEXT_MUTED,
-                    cursor: 'pointer', textTransform: 'capitalize', textTransform: 'capitalize' as 'capitalize'
-                  }}>
-                  Sort: {s === 'value' ? '₹/protein ↑' : s === 'price' ? 'Price ↑' : 'Protein ↓'}
-                </button>
-              ))}
-            </div>
-            <div style={{ color: TEXT_MUTED, fontSize: 13 }}>{filtered.length} products</div>
+            {(['value', 'price'] as const).map(s => (
+              <button key={s} onClick={() => setSortBy(s)}
+                style={{
+                  padding: '8px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+                  border: `1px solid ${sortBy === s ? C.accent : C.border}`,
+                  background: sortBy === s ? C.accentLight : C.surface,
+                  color: sortBy === s ? C.accent : C.textMuted,
+                  cursor: 'pointer',
+                }}>
+                {s === 'value' ? `Sort: Best Value` : 'Sort: Price ↑'}
+              </button>
+            ))}
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14 }}>
             {filtered.map((product, idx) => (
               <ProductCard key={product.id} product={product} rank={idx + 1} />
             ))}
           </div>
         </div>
 
-        <footer style={{ textAlign: 'center', color: TEXT_MUTED, fontSize: 12, paddingTop: 32, borderTop: `1px solid ${BORDER}` }}>
+        <footer style={{
+          textAlign: 'center', color: C.textLight, fontSize: 12,
+          paddingTop: 32, marginTop: 32, borderTop: `1px solid ${C.border}`
+        }}>
           Built with Next.js, Supabase & Recharts · Data scraped from optimumnutrition.co.in
         </footer>
       </main>
