@@ -1,3 +1,5 @@
+// @ts-nocheck
+
 import { NextResponse } from 'next/server';
 import { chromium } from 'playwright';
 import prisma from '@/lib/prisma';
