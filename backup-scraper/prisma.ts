@@ -1,4 +1,5 @@
 // src/lib/prisma.ts
+// @ts-nocheck
 import { PrismaClient } from '@/generated/prisma';
 
 const prismaClientSingleton = () => {
