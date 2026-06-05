@@ -43,6 +43,7 @@ export type ParsedProduct = {
   category: Category
   primaryMetricLabel: string   // e.g. "₹/g protein"
   primaryMetricValue: number   // the actual computed value
+  pricePerProtein: number
 }
 
 function detectCategory(url: string): Category {
@@ -144,8 +145,8 @@ export function parseProduct(product: Product): ParsedProduct {
     category,
     primaryMetricLabel,
     primaryMetricValue,
-    // keep for scatter chart
-    ...(({ pricePerProtein: _ , ...rest }) => rest)({ pricePerProtein }),
+   
+    
     pricePerProtein,
   }
 }

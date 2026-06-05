@@ -518,7 +518,7 @@ export default function Dashboard() {
                 <Tooltip content={<ScatterTooltip />} />
                 <Scatter
                   data={categoryProducts.filter(p => p.protein > 0)}
-                  shape={(props: Record<string, unknown>) => {
+                  shape={(props: any) => {
                     const { cx = 0, cy = 0, payload } = props as { cx?: number; cy?: number; payload?: ParsedProduct }
                     const color = payload ? CATEGORY_COLOR[payload.category] : C.accent
                     return <circle cx={cx} cy={cy} r={5} fill={color} fillOpacity={0.8} stroke={color} strokeWidth={1} style={{ cursor: 'pointer' }} />
