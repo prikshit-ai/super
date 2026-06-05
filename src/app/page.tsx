@@ -348,9 +348,11 @@ export default function Dashboard() {
       p.id.toString().includes(search) ||
       p.category.toLowerCase().includes(search.toLowerCase())
     )
-    return list.sort((a, b) =>
-      sortBy === 'price' ? a.price - b.price : a.primaryMetricValue - b.primaryMetricValue
-    )
+    return list
+      .filter(p => p.primaryMetricValue > 0)
+      .sort((a, b) =>
+        sortBy === 'price' ? a.price - b.price : a.primaryMetricValue - b.primaryMetricValue
+      )
   }, [categoryProducts, search, sortBy])
 
   const histogram = useMemo(() => buildHistogram(categoryProducts), [categoryProducts])
